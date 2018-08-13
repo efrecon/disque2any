@@ -33,6 +33,10 @@ The complete list of recognised options can be found below:
 - `-chunk` is the maximium number of jobs to get from one queue at a time, it
   defaults to `1`.
 
+- `-ackmode` can be one of `auto` (the default), `manual` or `boolean`. It
+  describes how procedures bound to job queues reception interact with the main
+  program for acknowledging (or rejecting) jobs. See below.
+
 ## Routing
 
 Through its `-routes` command-line option, you will be able to bind procedures
@@ -60,9 +64,16 @@ called with the following arguments.
 3. The job body.
 
 The procedure `print` is then free to perform any kind of operations it deems
-necessary on both the data.  Once all ingestion has succeeded, it can mark the
-job as done using the `disque` command.  That command is automatically bound to
-the queue and will look similar to the following pseudo code:
+necessary on the job data. An example `print` procedure is availabe under the
+`exts` subdirectory in the `printer.tcl` file. The procedure will print the
+content of each job received on the queue and automatically acknowledge it.
+
+### Interacting with Jobs
+
+When `-ackmode` is `manual` and once all ingestion has succeeded, the code of
+the procedure can mark the job as done using the `disque` command.  That command
+is automatically bound to the queue and will look similar to the following
+pseudo code:
 
     disque ack $id
 
@@ -75,6 +86,13 @@ are:
 
 - `working` to mediate the cluster that the job still is being worked on.
 
+When `-ackmode` is `boolean`, the procedure should return a boolean. When this
+boolean is true, the job will be acknowledge, otherwise it will be rejected.
+When `-ackmode` is auto, the behaviour is almost identical to `boolean`, but the
+return value will only be checked if the job still exists.
+
+### Additional Arguments
+
 To pass arguments to the procedure, you can separate them with `!`-signs after
 the name of the procedure.  These arguments will be blindly passed after the
 requested URL and the data to the procedure when it is executed.  So, for
@@ -84,10 +102,6 @@ called with five arguments everytime a job is available, i.e. the queue, the job
 id, the content of the job and `onearg` and `3` as arguments.  Spaces are
 allowed in arguments, as long as you specify quotes (or curly-braces) around the
 procedure call construct.
-
-An example procedure is availabe under the `exts` subdirectory. The procedure
-will print the content of each job received on the queue and automatically
-acknowledge it.
 
 ### Escaping Safe Interpreters
 

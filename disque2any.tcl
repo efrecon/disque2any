@@ -25,12 +25,13 @@ package require toclbox
 package require disque
 set prg_args {
     -help       ""               "Print this help and exit"
-    -verbose    "* DEBUG"        "Verbosity specification for program and modules"
+    -verbose    "* INFO"         "Verbosity specification for program and modules"
     -nodes      "localhost:7711" "List of remote Disque servers to connect to"
     -exts       "%prgdir%/exts"  "Path to plugins directory"
     -routes     ""               "Topic routing: default is direct mapping of ALL reqs!"
     -poll       "100"            "Job polling frequency, in ms"
     -chunk      "1"              "Max number of jobs to get from each queue"
+    -ackmode    "auto"           "Job acknowledgment mode: auto, manual or boolean"
 }
 
 
@@ -107,18 +108,38 @@ toclbox offload D2A(-routes) 3 "routes"
 toclbox offload D2A(-nodes) 1 "nodes"
 
 
-proc ::job { cmd id } {
+# ::job -- Slave job processing
+#
+#      This procedure is aliased into the slave interpreters under the command
+#      name 'disque'. The queue is automatically passed by construction and it
+#      enables slave interpreters to operate on Disque jobs, i.e. acknowledge
+#      the jobs, tell the cluster that job is still in process, etc.
+#
+# Arguments:
+#      queue    Name of queue at Disque
+#      cmd      Sub-command: ack(nowledge), work(ing), nack
+#      id       Job id
+#
+# Results:
+#      None.
+#
+# Side Effects:
+#      Uses the Disque API to clear away jobs, reschedule them, etc.
+proc ::job { queue cmd id } {
     global D2A
 
     set cmd [string tolower $cmd]
     switch -glob -- $cmd {
         "ack*" {
+            toclbox debug INFO "Acknowledging job $id in queue $queue"
             $D2A(disque) ackjob $id
         }
         "work*" {
+            toclbox debug INFO "Still working on job $id in queue $queue"
             $D2A(disque) working $id
         }
         "nack*" {
+            toclbox debug INFO "Giving up on job $id in queue $queue"
             $D2A(disque) nack $id
         }
     }
@@ -182,7 +203,7 @@ proc ::plugin:init { d } {
                 # with us: mqtt to send and debug to output some debugging
                 # information.
                 set slave [::safe::interpCreate]
-                $slave alias disque ::job
+                $slave alias disque ::job $queue
                 $slave alias debug ::debug $fname
                 # Automatically pass further all environment variables that
                 # start with the same as the rootname of the plugin
@@ -259,46 +280,64 @@ proc ::plugin:init { d } {
 }
 
 
+# Poll -- Periodical queue polling
+#
+#      Periodically polls all queues for possible jobs by chunks. Polling is
+#      non-blocking.  Automatically acknowledge or reject jobs depending on the
+#      boolean returned by the bound procedure when in -ackmode is set to auto.
+#
+# Arguments:
+#      None.
+#
+# Results:
+#      None.
+#
+# Side Effects:
+#      Poll the queue for jobs and automatically ack or nack the jobs when
+#      relevant
 proc Poll {} {
     global D2A
 
     foreach { queue route options } $D2A(-routes) {
-        set len [$D2A(disque) qlen $queue]
-        if { $len > 0 } {
-            # Decide number of jobs to get from queue
-            if { $len > $D2A(-chunk) } {
-                set nbjobs $D2A(-chunk)
-            } else {
-                set nbjobs $len
-            }
+        # Get each job from the queue
+        toclbox debug DEBUG "Acquiring $D2A(-chunk) job(s) from $queue"
+        foreach job [$D2A(disque) getjob -nohang -count $D2A(-chunk) $queue] {
+            lassign $job q jid body
 
-            # Get each job from the queue
-            toclbox debug DEBUG "Acquiring $nbjobs job(s) from $queue"
-            foreach job [$D2A(disque) getjob -nohang -count $nbjobs $queue] {
-                lassign $job q jid body
-
-                if { [dict exists $D2A(plugins) $route] } {
-                    set slave [dict get $D2A(plugins) $route]
-                    if { [interp exists $slave] } {
-                        foreach {proc fname} [split $route "@"] break
-                        # Isolate procedure name from possible arguments.
-                        set call [split $proc !]
-                        set proc [lindex $call 0]
-                        set args [lrange $call 1 end]
-                        # Pass requested URL, headers and POSTed data to the plugin
-                        # procedure.
-                        if { [catch {$slave eval [linsert $args 0 $proc $queue $jid $body]} res] } {
-                            toclbox log warn "Error when calling back $proc: $res"
-                        } else {
-                            toclbox log debug "Successfully called $proc for $queue: $res"
-                        }
+            toclbox debug INFO "Attempting to route and ingest job $jid from queue $queue"
+            if { [dict exists $D2A(plugins) $route] } {
+                set slave [dict get $D2A(plugins) $route]
+                if { [interp exists $slave] } {
+                    foreach {proc fname} [split $route "@"] break
+                    # Isolate procedure name from possible arguments.
+                    set call [split $proc !]
+                    set proc [lindex $call 0]
+                    set args [lrange $call 1 end]
+                    # Pass requested URL, headers and POSTed data to the plugin
+                    # procedure.
+                    if { [catch {$slave eval [linsert $args 0 $proc $queue $jid $body]} res] } {
+                        toclbox log warn "Error when calling back $proc: $res"
                     } else {
-                        toclbox log warn "Cannot find slave interp for $route anymore!"
+                        toclbox log debug "Successfully called $proc for queue $queue: $res"
+                        # Acknowledge or reject job depending on the result of
+                        # the procedure. When in auto mode, we check that the
+                        # job still exists before we even look at the result.
+                        if { $D2A(-ackmode) in [list "auto" "boolean"] } {
+                            if { $D2A(-ackmode) eq "boolean" || [llength [$D2A(disque) show $jid]] } {
+                                if { [string is boolean -strict $res] } {
+                                    job $queue [expr {$res?"ack":"nack"}] $jid
+                                } else {
+                                    toclbox debug WARN "'$res' is not a boolean, return a boolean\
+                                                        or use the 'disque' command from your script!"
+                                }
+                            }
+                        }
                     }
                 } else {
-                    toclbox log warn "Cannot find plugin at $fname for $route"
+                    toclbox log warn "Cannot find slave interp for $route anymore!"
                 }
-
+            } else {
+                toclbox log warn "Cannot find plugin at $fname for $route"
             }
         }
     }
@@ -307,10 +346,25 @@ proc Poll {} {
 }
 
 
+# Liveness -- Connection liveness
+#
+#      Print liveness of connection
+#
+# Arguments:
+#      d        Identifier of connection to Disque
+#      state    State of connection
+#      args     Additional arguments depending on state
+#
+# Results:
+#      None.
+#
+# Side Effects:
+#      None.
 proc Liveness { d state args } {
     toclbox debug INFO "Connection state is $state: $args"
 }
 
+# Open connection to one of the servers
 set D2A(disque) [disque -nodes $D2A(-nodes)]
 
 # Read list of recognised plugins out from the routes.  Plugins are only to be
@@ -323,4 +377,3 @@ if { [llength [plugin:init $D2A(disque)]] } {
 } else {
     toclbox debug WARN "No successfull routing established, aborting"
 }
-
