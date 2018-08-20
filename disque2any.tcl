@@ -273,15 +273,28 @@ proc ::plugin:init { d } {
                     }
                 }
                 toclbox log info "Loading plugin at $plugin"
-                if { [catch {$slave invokehidden source $plugin} res] == 0 } {
-                    # Remember fullpath to plugin, this will be used when data
-                    # is coming in to select the slave to send data to. Without
-                    # presence of the key in the dictionary, the HTTP receiving
-                    # callback will not forward data.
-                    dict set D2A(plugins) $route $slave
-                    lappend slaves $slave
+                if { $strong } {
+                    if { [catch {$slave eval source $plugin} res] == 0 } {
+                        # Remember fullpath to plugin, this will be used when data
+                        # is coming in to select the slave to send data to. Without
+                        # presence of the key in the dictionary, the HTTP receiving
+                        # callback will not forward data.
+                        dict set D2A(plugins) $route $slave
+                        lappend slaves $slave
+                    } else {
+                        toclbox log error "Cannot load plugin at $plugin: $res"
+                    }
                 } else {
-                    toclbox log error "Cannot load plugin at $plugin: $res"
+                    if { [catch {$slave invokehidden source $plugin} res] == 0 } {
+                        # Remember fullpath to plugin, this will be used when data
+                        # is coming in to select the slave to send data to. Without
+                        # presence of the key in the dictionary, the HTTP receiving
+                        # callback will not forward data.
+                        dict set D2A(plugins) $route $slave
+                        lappend slaves $slave
+                    } else {
+                        toclbox log error "Cannot load plugin at $plugin: $res"
+                    }
                 }
                 break;         # First match wins!
             }
