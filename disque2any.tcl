@@ -192,7 +192,16 @@ proc ::plugin:init { d } {
     set slaves [list]
     foreach { queue route options } $D2A(-routes) {
         toclbox log info "Routing jobs from queue $queue through $route"
-        foreach {proc fname} [split $route "@"] break
+        lassign [split $route "@"] proc fname
+        
+        # Use a "!" leading character for the filename as a marker for non-safe
+        # interpreters.
+        if { [string index $fname 0] eq "!" } {
+            set strong 1
+            set fname [string range $fname 1 end]
+        } else {
+            set strong 0
+        }
         
         foreach dir $D2A(-exts) {
             set plugin [file join [toclbox resolve $dir [list appname $::appname]] $fname]
@@ -202,7 +211,11 @@ proc ::plugin:init { d } {
                 # Create slave interpreter and give it two commands to interact
                 # with us: mqtt to send and debug to output some debugging
                 # information.
-                set slave [::safe::interpCreate]
+                if { $strong } {
+                    set slave [interp create]
+                } else {
+                    set slave [::safe::interpCreate]
+                }
                 $slave alias disque ::job $queue
                 $slave alias debug ::debug $fname
                 # Automatically pass further all environment variables that
