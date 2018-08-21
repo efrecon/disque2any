@@ -13,7 +13,7 @@ allowed to communicate with.
 The program only accepts single-dash led full options on the command-line.
 The complete list of recognised options can be found below:
 
-- `-nodes` is a space separated list of nodes to connect to within the Disque
+- `-nodes` is a space-separated list of nodes to connect to within the Disque
   cluster. Each specification is of the form `<password>@<hostname>:<port>`
   where the password and port number can be omitted. Connection will be
   establish to one of the host at random. The default is to attempt connection
@@ -137,3 +137,16 @@ follows:
   will arrange to pass the variable (and its value) to the safe interpreter.
 
   [socket]: https://www.tcl.tk/man/tcl/TclCmd/socket.htm
+
+#### Strong Interpreters
+
+Whenever the name of the file from which the interpreter is to be created starts
+with an exclamation mark (`!`), the sign will be removed from the name when
+looking for the implementation and the interpreter will be a regular (non-safe)
+interpreter. This allows for more powerful interpreters, or to make use of
+packages that have no support for the safe base.
+
+Creating non-safe interpreters is not the preferred way of interacting with
+external code. It should only be used in controlled and trusted environments.
+Otherwise, `disque2any` is tuned for working with code in sandboxed interpreters
+and the additional security that safe interpreters provide.
