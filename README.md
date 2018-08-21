@@ -6,7 +6,9 @@ from specified queues to sandboxed [Tcl](https://www.tcl.tk/)
 [interpreters](https://www.tcl.tk/man/tcl8.6/TclCmd/safe.htm) for ingestion and
 treatment. The sandboxing is able to restrict which part of the disk hierarchy
 is accessible to the interpreters, and which hosts these interpreters are
-allowed to communicate with.
+allowed to communicate with. This manual describes command-line options and the
+interaction between the job queues and ingesting procedures. For a quick
+tutorial, consult [this](TUTORIAL.md) document instead.
 
 ## Command-Line Options
 
@@ -150,3 +152,13 @@ Creating non-safe interpreters is not the preferred way of interacting with
 external code. It should only be used in controlled and trusted environments.
 Otherwise, `disque2any` is tuned for working with code in sandboxed interpreters
 and the additional security that safe interpreters provide.
+
+## Docker
+
+A Docker [image](https://hub.docker.com/r/efrecon/disque2any/) is provided. The
+image builds upon [efrecon/medium-tcl] in order to provide a rather complete
+Tcl-programming environment for running Disque ingestion scripts. In order to
+provide your own scripts, easiest is to make them available under the
+`/var/disque2any/exts` directory of containers based on this image.
+
+  [efrecon/medium-tcl]: https://hub.docker.com/r/efrecon/medium-tcl/
