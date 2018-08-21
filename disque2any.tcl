@@ -176,7 +176,7 @@ proc ::debug { pkg msg {lvl "DEBUG"}} {
 #       the requested plugins.  Each plugin filename will lead to the
 #       creation of a safe interpreter with the same name.  The
 #       content of the file will be sourced in the interpreter and the
-#       interpreter will be donated commands "debug" and "job".
+#       interpreter will be donated commands "debug" and "disque".
 #
 # Arguments:
 #	disque	Identifier of Disque connection
@@ -213,8 +213,8 @@ proc ::plugin:init { d } {
                 # plugin implementation.
                 set envptn [string toupper [file rootname [file tail $plugin]]]*
                 # Create slave interpreter and give it two commands to interact
-                # with us: mqtt to send and debug to output some debugging
-                # information.
+                # with us: disque to operate on jobs and debug to output some
+                # debugging information.
                 if { $strong } {
                     set slave [::toclbox::interp::create $plugin -environment $envptn {*}$options]
                 } else {
@@ -257,7 +257,7 @@ proc Poll {} {
 
     foreach { queue route options } $D2A(-routes) {
         # Get each job from the queue
-        toclbox debug DEBUG "Acquiring $D2A(-chunk) job(s) from $queue"
+        toclbox debug DEBUG "Trying to acquire $D2A(-chunk) job(s) from $queue"
         foreach job [$D2A(disque) getjob -nohang -count $D2A(-chunk) $queue] {
             lassign $job q jid body
 
