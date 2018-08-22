@@ -216,14 +216,20 @@ proc ::plugin:init { d } {
                 # with us: disque to operate on jobs and debug to output some
                 # debugging information.
                 if { $strong } {
-                    set slave [::toclbox::interp::create $plugin -environment $envptn {*}$options]
+                    set slave [::toclbox::interp::create $plugin \
+                                        -environment $envptn \
+                                        -alias [list disque ::job $queue] \
+                                        -alias [list debug ::debug $fname] \
+                                        {*}$options]
                 } else {
-                    set slave [::toclbox::interp::create $plugin -safe -environment $envptn {*}$options]
+                    set slave [::toclbox::interp::create $plugin \
+                                        -safe \
+                                        -environment $envptn \
+                                        -alias [list disque ::job $queue] \
+                                        -alias [list debug ::debug $fname] \
+                                        {*}$options]
                 }
                 if { $slave ne "" } {
-                    $slave alias disque ::job $queue
-                    $slave alias debug ::debug $fname
-
                     dict set D2A(plugins) $route $slave
                     lappend slaves $slave
                 }
