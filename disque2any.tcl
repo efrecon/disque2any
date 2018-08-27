@@ -456,7 +456,6 @@ proc NextConnect { { force 0 } } {
 # Open connection to one of the servers and keep trying to connect to the
 # servers whenever the connection isn't alive.
 Connect
-after 5000 [list ::Disconnect]
 
 # Read list of recognised plugins out from the routes.  Plugins are only to be
 # found in the directory specified as part of the -exts option.  Each file will
