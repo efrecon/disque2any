@@ -324,11 +324,22 @@ proc Poll {} {
 # Side Effects:
 #      None.
 proc Liveness { d state args } {
-    toclbox debug INFO "Connection state is $state: $args"
+    switch -- [string toupper $state] {
+        "COMMAND" {
+            # Nothing here on purpose
+        }
+        default {
+            if { [llength $args] } {
+                toclbox debug INFO "Connection state is $state: $args"
+            } else {
+                toclbox debug INFO "Connection state is $state"
+            }
+        }
+    }
 }
 
 # Open connection to one of the servers
-set D2A(disque) [disque -nodes $D2A(-nodes)]
+set D2A(disque) [disque -nodes $D2A(-nodes) -liveness ::Liveness]
 
 # Read list of recognised plugins out from the routes.  Plugins are only to be
 # found in the directory specified as part of the -exts option.  Each file will
