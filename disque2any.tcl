@@ -32,6 +32,7 @@ set prg_args {
     -poll       "100"            "Job polling frequency, in ms"
     -chunk      "1"              "Max number of jobs to get from each queue"
     -ackmode    "auto"           "Job acknowledgment mode: auto, manual or boolean"
+    -retry      "100:120000"     "Retry connection?"    
 }
 
 
@@ -79,6 +80,8 @@ if { [toclbox getopt opts -help] } {
 # the way into the main program's status array.
 array set D2A {
     plugins {}
+    disque  ""
+    retry   -1
 }
 foreach { arg val dsc } $prg_args {
     set D2A($arg) $val
@@ -261,46 +264,58 @@ proc ::plugin:init { d } {
 proc Poll {} {
     global D2A
 
-    foreach { queue route options } $D2A(-routes) {
-        # Get each job from the queue
-        toclbox debug DEBUG "Trying to acquire $D2A(-chunk) job(s) from $queue"
-        foreach job [$D2A(disque) getjob -nohang -count $D2A(-chunk) $queue] {
-            lassign $job q jid body
+    if { $D2A(disque) ne "" } {
+        foreach { queue route options } $D2A(-routes) {
+            # Get each job from the queue
+            toclbox debug DEBUG "Trying to acquire $D2A(-chunk) job(s) from $queue"
+            if { [catch {$D2A(disque) getjob -nohang -count $D2A(-chunk) $queue} jlist] == 0 } {
+                foreach job $jlist {
+                    lassign $job q jid body
 
-            toclbox debug INFO "Attempting to route and ingest job $jid from queue $queue"
-            if { [dict exists $D2A(plugins) $route] } {
-                set slave [dict get $D2A(plugins) $route]
-                if { [interp exists $slave] } {
-                    foreach {proc fname} [split $route "@"] break
-                    # Isolate procedure name from possible arguments.
-                    set call [split $proc !]
-                    set proc [lindex $call 0]
-                    set args [lrange $call 1 end]
-                    # Pass requested URL, headers and POSTed data to the plugin
-                    # procedure.
-                    if { [catch {$slave eval [linsert $args 0 $proc $queue $jid $body]} res] } {
-                        toclbox log warn "Error when calling back $proc: $res"
-                    } else {
-                        toclbox log debug "Successfully called $proc for queue $queue: $res"
-                        # Acknowledge or reject job depending on the result of
-                        # the procedure. When in auto mode, we check that the
-                        # job still exists before we even look at the result.
-                        if { $D2A(-ackmode) in [list "auto" "boolean"] } {
-                            if { $D2A(-ackmode) eq "boolean" || [llength [$D2A(disque) show $jid]] } {
-                                if { [string is boolean -strict $res] } {
-                                    job $queue [expr {$res?"ack":"nack"}] $jid
-                                } else {
-                                    toclbox debug WARN "'$res' is not a boolean, return a boolean\
-                                                        or use the 'disque' command from your script!"
+                    toclbox debug INFO "Attempting to route and ingest job $jid from queue $queue"
+                    if { [dict exists $D2A(plugins) $route] } {
+                        set slave [dict get $D2A(plugins) $route]
+                        if { [interp exists $slave] } {
+                            foreach {proc fname} [split $route "@"] break
+                            # Isolate procedure name from possible arguments.
+                            set call [split $proc !]
+                            set proc [lindex $call 0]
+                            set args [lrange $call 1 end]
+                            # Pass requested URL, headers and POSTed data to the plugin
+                            # procedure.
+                            if { [catch {$slave eval [linsert $args 0 $proc $queue $jid $body]} res] } {
+                                toclbox log warn "Error when calling back $proc: $res"
+                            } else {
+                                toclbox log debug "Successfully called $proc for queue $queue: $res"
+                                # Acknowledge or reject job depending on the result of
+                                # the procedure. When in auto mode, we check that the
+                                # job still exists before we even look at the result.
+                                if { $D2A(-ackmode) in [list "auto" "boolean"] } {
+                                    if { $D2A(-ackmode) eq "boolean" || [llength [$D2A(disque) show $jid]] } {
+                                        if { [string is boolean -strict $res] } {
+                                            job $queue [expr {$res?"ack":"nack"}] $jid
+                                        } else {
+                                            toclbox debug WARN "'$res' is not a boolean, return a boolean\
+                                                                or use the 'disque' command from your script!"
+                                        }
+                                    }
                                 }
                             }
+                        } else {
+                            toclbox log warn "Cannot find slave interp for $route anymore!"
                         }
+                    } else {
+                        toclbox log warn "Cannot find plugin at $fname for $route"
                     }
-                } else {
-                    toclbox log warn "Cannot find slave interp for $route anymore!"
                 }
             } else {
-                toclbox log warn "Cannot find plugin at $fname for $route"
+                toclbox debug WARN "Could not get job list: $jlist"
+                set again [NextConnect]
+                if { $again >= 0 } {
+                    after $again [list ::Connect 1 1]
+                } else {
+                    set D2A(disque) ""
+                }
             }
         }
     }
@@ -324,22 +339,98 @@ proc Poll {} {
 # Side Effects:
 #      None.
 proc Liveness { d state args } {
-    switch -- [string toupper $state] {
-        "COMMAND" {
-            # Nothing here on purpose
+    global D2A
+
+    # Debug output
+    if { [string toupper $state] ne "COMMAND" } {
+        if { [llength $args] } {
+            toclbox debug INFO "Connection state is $state: $args"
+        } else {
+            toclbox debug INFO "Connection state is $state"
         }
-        default {
-            if { [llength $args] } {
-                toclbox debug INFO "Connection state is $state: $args"
-            } else {
-                toclbox debug INFO "Connection state is $state"
-            }
+    }
+
+    switch -- [string toupper $state] {
+        "CONNECTED" {
+            set D2A(retry) -1
+        }
+        "CLOSE" {
         }
     }
 }
 
+
+proc ::Connect { { force 0 } { regular 1 } } {
+    global D2A
+
+    if { $force } {
+        if { $D2A(disque) ne "" } {
+            if { [catch {$D2A(disque) close} err] == 0 } {
+                toclbox debug NOTICE "Close connection to Disque server"
+            } else {
+                toclbox debug WARN "Error when closing connection to Disque server: $err"
+            }
+        }
+        set D2A(disque) ""
+    }
+
+    if { $D2A(disque) eq "" } {
+        toclbox debug NOTICE "Connecting to one of the Disque server at $D2A(-nodes)"
+        if { [catch {disque -nodes $D2A(-nodes) -liveness ::Liveness} d] == 0 } {
+            set D2A(disque) $d
+        } else {
+            toclbox debug WARN "Could not connect! $d"
+            if { $regular } {
+                set again [NextConnect]
+                if { $again >= 0 } {
+                    toclbox debug INFO "New connection attempt in $again ms."
+                    after $again [list ::Connect]
+                }
+            }
+        }
+    }
+
+    return $D2A(disque)
+}
+
+proc NextConnect {} {
+    global D2A
+
+    # Try to connect again to the server in a little while, this
+    # will arrange to force the creation of a whole new MQTT
+    # context and connection. The current implementation is able
+    # of exponential backoff to minimise the strain on the broker
+    if { [string first ":" $D2A(-retry)] >= 0 } {
+        # Use the colon sign to express the minimum time to wait
+        # for reconnection, the maximum and the factor by which
+        # to multiply each time (defaults to twice)
+        lassign [split $D2A(-retry) ":"] min max factor
+        if { $factor eq "" } { set factor 2 }
+        if { $D2A(retry) < 0 } {
+            set D2A(retry) $min
+        } elseif { $D2A(retry) > $max } {
+            set D2A(retry) $max
+        } else {
+            set D2A(retry) [expr {int($D2A(retry)*$factor)}]
+        }
+    } else {
+        # Otherwise -retry should just be an integer. Covers for
+        # most mistakes (non-integer, empty string) through
+        # turning the feature off.
+        set D2A(retry) $D2A(-retry)
+        if { $D2A(retry) eq "" \
+                    || ![string is integer -strict $D2A(retry)] } {
+            toclbox debug WARN "$D2A(-retry) should be an integer or integers separated by colon signs!"
+            set D2A(retry) -1
+        }
+    }
+
+    return $D2A(retry)
+}
+
 # Open connection to one of the servers
-set D2A(disque) [disque -nodes $D2A(-nodes) -liveness ::Liveness]
+Connect
+after 5000 "$D2A(disque) close"
 
 # Read list of recognised plugins out from the routes.  Plugins are only to be
 # found in the directory specified as part of the -exts option.  Each file will
