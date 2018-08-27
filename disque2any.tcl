@@ -241,8 +241,7 @@ proc ::plugin:init { d } {
         }
     }
 
-    return $slaves
-    
+    return $slaves    
 }
 
 
@@ -309,13 +308,11 @@ proc Poll {} {
                     }
                 }
             } else {
+                # Force disconnection, any jobs will stay at the server(s) and
+                # we will try to reconnect if relevant for the command line
+                # arguments.
                 toclbox debug WARN "Could not get job list: $jlist"
-                set again [NextConnect]
-                if { $again >= 0 } {
-                    after $again [list ::Connect 1 1]
-                } else {
-                    set D2A(disque) ""
-                }
+                Disconnect
             }
         }
     }
@@ -350,9 +347,12 @@ proc Liveness { d state args } {
         }
     }
 
+    # Take care of connection state. This arranges to reset the (re)connection
+    # exponential backoff timer to its initial state as soon as we've had
+    # success connecting to the server.
     switch -- [string toupper $state] {
         "CONNECTED" {
-            set D2A(retry) -1
+            set D2A(retry) [NextConnect 1]
         }
         "CLOSE" {
         }
@@ -360,41 +360,66 @@ proc Liveness { d state args } {
 }
 
 
-proc ::Connect { { force 0 } { regular 1 } } {
+proc ::Disconnect {} {
     global D2A
 
-    if { $force } {
-        if { $D2A(disque) ne "" } {
-            if { [catch {$D2A(disque) close} err] == 0 } {
-                toclbox debug NOTICE "Close connection to Disque server"
-            } else {
-                toclbox debug WARN "Error when closing connection to Disque server: $err"
-            }
+    if { $D2A(disque) ne "" } {
+        if { [catch {$D2A(disque) close} err] == 0 } {
+            toclbox debug NOTICE "Close connection to Disque server"
+        } else {
+            toclbox debug WARN "Error when closing connection to Disque server: $err"
         }
-        set D2A(disque) ""
+    }
+    set D2A(disque) ""
+}
+
+
+proc ::Connect { { force 0 } } {
+    global D2A
+
+    # Force disconnection
+    if { $force } {
+        Disconnect
     }
 
+    # Try to connect and keep state in global array
     if { $D2A(disque) eq "" } {
         toclbox debug NOTICE "Connecting to one of the Disque server at $D2A(-nodes)"
         if { [catch {disque -nodes $D2A(-nodes) -liveness ::Liveness} d] == 0 } {
             set D2A(disque) $d
         } else {
             toclbox debug WARN "Could not connect! $d"
-            if { $regular } {
-                set again [NextConnect]
-                if { $again >= 0 } {
-                    toclbox debug INFO "New connection attempt in $again ms."
-                    after $again [list ::Connect]
-                }
-            }
         }
+    }
+
+    # Decide when to try with connection next time, the logic is that we won't
+    # try to connect if we already have a connection, meaning that we can have
+    # the timer going all the time if necessary.
+    set when -1
+    if { $D2A(disque) eq "" } {
+        set when [NextConnect]
+        if { $when >= 0 } {
+            toclbox debug INFO "New connection attempt in $when ms."
+        }
+    } else {
+        set when $D2A(retry)
+    }
+
+    # Perform connection check only if we should.
+    if { $when >= 0 } {
+        after $when [list ::Connect]
     }
 
     return $D2A(disque)
 }
 
-proc NextConnect {} {
+proc NextConnect { { force 0 } } {
     global D2A
+
+    # Force reconnection backoff timer (re)initialisation.
+    if { $force } {
+        set D2A(retry) -1
+    }
 
     # Try to connect again to the server in a little while, this
     # will arrange to force the creation of a whole new MQTT
@@ -428,9 +453,10 @@ proc NextConnect {} {
     return $D2A(retry)
 }
 
-# Open connection to one of the servers
+# Open connection to one of the servers and keep trying to connect to the
+# servers whenever the connection isn't alive.
 Connect
-after 5000 "$D2A(disque) close"
+after 5000 [list ::Disconnect]
 
 # Read list of recognised plugins out from the routes.  Plugins are only to be
 # found in the directory specified as part of the -exts option.  Each file will
