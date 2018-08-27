@@ -140,6 +140,17 @@ follows:
 
   [socket]: https://www.tcl.tk/man/tcl/TclCmd/socket.htm
 
+- `-retry` describes what this program should be done when disconnected from a
+  Disque server node. Whenever this is an integer less than 0, no reconnection
+  will be attempted. Otherwise the value of this option should be an integer
+  number of milliseconds expressing the period at which reconnection attempts
+  will be made. The value of this option can also be up to three integers
+  separated by the colon `:` sign, to implement an exponential backoff for
+  reconnection. The first integer is the minimal number of milliseconds to wait
+  before reconnecting. The second integer the maximum number of milliseconds to
+  wait and the last the factor by which to multiply the previous period at each
+  unsuccessfull reconnection attempt (defaults to `2`).
+
 #### Strong Interpreters
 
 Whenever the name of the file from which the interpreter is to be created starts
