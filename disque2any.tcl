@@ -107,6 +107,16 @@ toclbox debug DEBUG [string trim $startup]
 
 # Possibly read nodes and routes information from files instead, since these
 # might get big
+toclbox apparmor -allow */bin/echo \
+                 -allow */bin/printf \
+                 -allow */bin/grep \
+                 -allow */bin/sed \
+                 -allow */bin/awk \
+                 -allow */bin/jq \
+                 -allow */bin/cut \
+                 -allow */bin/head \
+                 -allow */bin/tail \
+                 -allow */bin/sort
 toclbox offload D2A(-routes) 3 "routes"
 toclbox offload D2A(-nodes) 1 "nodes"
 
