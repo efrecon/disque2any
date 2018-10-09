@@ -116,6 +116,7 @@ toclbox apparmor -allow */bin/echo \
                  -allow */bin/cut \
                  -allow */bin/head \
                  -allow */bin/tail \
+                 -allow */bin/tr \
                  -allow */bin/sort
 toclbox offload D2A(-routes) 3 "routes"
 toclbox offload D2A(-nodes) 1 "nodes"
