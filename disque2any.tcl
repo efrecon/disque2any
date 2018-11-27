@@ -442,12 +442,11 @@ proc NextConnect { { force 0 } } {
         # to multiply each time (defaults to twice)
         lassign [split $D2A(-retry) ":"] min max factor
         if { $factor eq "" } { set factor 2 }
+        set D2A(retry) [expr {int($D2A(retry)*$factor)}]
         if { $D2A(retry) < 0 } {
             set D2A(retry) $min
         } elseif { $D2A(retry) > $max } {
             set D2A(retry) $max
-        } else {
-            set D2A(retry) [expr {int($D2A(retry)*$factor)}]
         }
     } else {
         # Otherwise -retry should just be an integer. Covers for
